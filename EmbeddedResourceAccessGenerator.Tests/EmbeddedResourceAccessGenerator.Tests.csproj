@@ -17,6 +17,9 @@
 		<EmbeddedResource Include="TestAssets\Subfolder\Test.txt" />
 		<EmbeddedResource Include="TestAssets\Test With Spaces.txt" />
 		<EmbeddedResource Include="TestAssets\Test.txt" />
+		<EmbeddedResource Include="TestAssets\lowercase.txt" />
+		<EmbeddedResource Include="TestAssets\test_file.txt" />
+		<EmbeddedResource Include="TestAssets\test-file.txt" />
 	</ItemGroup>
 
 	<ItemGroup>

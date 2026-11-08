@@ -22,15 +22,13 @@ public class EmbeddedResourceAccessGenerator : IIncrementalGenerator
 		DiagnosticSeverity.Error,
 		isEnabledByDefault: true);
 
-#if DEBUG
-	private static readonly DiagnosticDescriptor logInfo = new(
-		id: "EMBRESGENLOG",
-		title: "Log",
-		messageFormat: "{0}",
+	private static readonly DiagnosticDescriptor resourceCollisionWarning = new(
+		id: "EMBRESGEN002",
+		title: "Resource name collision",
+		messageFormat: "Multiple resources map to the same identifier '{0}'. Only the first resource will be accessible. Affected resources: '{1}' and '{2}'.",
 		category: "MessageExtensionGenerator",
 		DiagnosticSeverity.Warning,
 		isEnabledByDefault: true);
-#endif
 
 	/// <inheritdoc />
 	public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -177,6 +175,12 @@ public class EmbeddedResourceAccessGenerator : IIncrementalGenerator
 			return;
 		}
 
+		// If root namespace is null or empty, skip generation to avoid producing invalid code.
+		if (string.IsNullOrEmpty(rootNamespace))
+		{
+			return;
+		}
+
 		// Build a tree structure from the stripped manifest resource names.
 		// The name (e.g. "TestAssets.Subfolder.Test.txt") maps to nested classes.
 		var root = new ResourceNode(string.Empty, null);
@@ -192,7 +196,13 @@ public class EmbeddedResourceAccessGenerator : IIncrementalGenerator
 				string identifier = EmbeddedResourceAccessGenerator.GetValidIdentifierName(nameParts[i]);
 				// Only the last part gets the resource item.
 				EmbeddedResourceItem? resourceItem = i == nameParts.Length - 1 ? item : null;
-				current = current.FindOrCreateChild(identifier, resourceItem);
+				var result = current.FindOrCreateChild(identifier, resourceItem);
+				if (result.Collision && resourceItem != null)
+				{
+					context.ReportDiagnostic(Diagnostic.Create(EmbeddedResourceAccessGenerator.resourceCollisionWarning, Location.None,
+						identifier, result.ExistingNode.ResourceItem?.ManifestResourceName ?? "unknown", resourceItem.ManifestResourceName));
+				}
+				current = result.ExistingNode;
 			}
 		}
 
@@ -286,7 +296,6 @@ public class EmbeddedResourceAccessGenerator : IIncrementalGenerator
 	private static string GetValidIdentifierName(string resourceName)
 	{
 		StringBuilder sb = new(resourceName);
-		sb.Replace('.', '_');
 
 		bool first = true;
 		for (int index = 0; index < resourceName.Length; index++)
@@ -324,8 +333,21 @@ public class EmbeddedResourceAccessGenerator : IIncrementalGenerator
 			first = false;
 		}
 
-		return sb.ToString();
-	}
+ 		string identifier = sb.ToString();
+
+ 		// Ensure the identifier always starts with an uppercase letter to avoid
+ 		// conflicts with C# keywords (which are all lowercase). This also handles
+ 		// the case-insensitive filesystem collision issue: files like "Test.txt" and
+ 		// "test.txt" will produce the same identifier after uppercasing the first char,
+ 		// but they will be caught by the collision detection below.
+ 		if (identifier.Length > 0 && char.IsLower(identifier[0]))
+ 		{
+ 			identifier = char.ToUpper(identifier[0], CultureInfo.InvariantCulture) + identifier.Substring(1);
+ 		}
+
+ 		return identifier;
+ 	}
+
 }
 
 /// <summary>
@@ -343,18 +365,19 @@ internal class ResourceNode
 		this.ResourceItem = resourceItem;
 	}
 
-	public ResourceNode FindOrCreateChild(string identifier, EmbeddedResourceItem? resourceItem)
+	public (bool Collision, ResourceNode ExistingNode) FindOrCreateChild(string identifier, EmbeddedResourceItem? resourceItem)
 	{
 		foreach (var child in this.Children)
 		{
 			if (child.Identifier == identifier)
 			{
-				return child;
+				// Collision detected — return the existing node and flag the collision.
+				return (true, child);
 			}
 		}
 
 		var newNode = new ResourceNode(identifier, resourceItem);
 		this.Children.Add(newNode);
-		return newNode;
+		return (false, newNode);
 	}
 }

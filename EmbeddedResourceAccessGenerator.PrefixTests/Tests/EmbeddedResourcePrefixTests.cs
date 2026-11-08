@@ -17,10 +17,10 @@ public class EmbeddedResourcePrefixTests
 		// "EmbeddedResourceAccessGenerator.PrefixTests.Embedded.Resources.Test.txt"
 		// becomes "Resources.Test.txt" after stripping root namespace and prefix.
 		// So it's accessible as EmbeddedResources.Resources.Test.txt
-		using var reader = EmbeddedResources.Resources.Test.txt.GetReader();
+		using var reader = EmbeddedResources.Resources.Test.Txt.GetReader();
 		Assert.Equal("PrefixTestResource", reader.ReadToEnd().Trim());
 		
-		using var stream = EmbeddedResources.Resources.Test.txt.GetStream();
+		using var stream = EmbeddedResources.Resources.Test.Txt.GetStream();
 		using var reader2 = new System.IO.StreamReader(stream);
 		Assert.Equal("PrefixTestResource", reader2.ReadToEnd().Trim());
 	}
@@ -32,10 +32,10 @@ public class EmbeddedResourcePrefixTests
 		// Manifest: "EmbeddedResourceAccessGenerator.PrefixTests.Embedded.Resources.Subfolder.Nested.txt"
 		// After stripping: "Resources.Subfolder.Nested.txt"
 		// Accessible as: EmbeddedResources.Resources.Subfolder.Nested.txt
-		using var reader = EmbeddedResources.Resources.Subfolder.Nested.txt.GetReader();
+		using var reader = EmbeddedResources.Resources.Subfolder.Nested.Txt.GetReader();
 		Assert.Equal("NestedResource", reader.ReadToEnd().Trim());
 
-		using var stream = EmbeddedResources.Resources.Subfolder.Nested.txt.GetStream();
+		using var stream = EmbeddedResources.Resources.Subfolder.Nested.Txt.GetStream();
 		using var reader2 = new System.IO.StreamReader(stream);
 		Assert.Equal("NestedResource", reader2.ReadToEnd().Trim());
 	}

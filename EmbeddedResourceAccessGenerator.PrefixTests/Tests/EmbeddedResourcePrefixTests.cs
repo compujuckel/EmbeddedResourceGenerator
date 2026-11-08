@@ -53,4 +53,18 @@ public class EmbeddedResourcePrefixTests
 		Assert.Contains(names, n => n.Contains("Embedded.Resources.Test.txt"));
 		Assert.Contains(names, n => n.Contains("Embedded.Resources.Subfolder.Nested.txt"));
 	}
+
+	[Fact]
+	public void NonMatchingPrefix_ResourceIsAccessibleWithFullPath()
+	{
+		// A resource "Other/Unmatched.txt" does not start with the configured prefix "Embedded".
+		// The prefix is not stripped, so the full relative path "Other.Unmatched.txt" is used.
+		// It should be accessible as EmbeddedResources.Other.Unmatched.Txt.
+		using var reader = EmbeddedResources.Other.Unmatched.Txt.GetReader();
+		Assert.Equal("NoPrefixResource", reader.ReadToEnd().Trim());
+
+		using var stream = EmbeddedResources.Other.Unmatched.Txt.GetStream();
+		using var reader2 = new System.IO.StreamReader(stream);
+		Assert.Equal("NoPrefixResource", reader2.ReadToEnd().Trim());
+	}
 }

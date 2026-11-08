@@ -11,6 +11,7 @@
 	<ItemGroup>
 		<EmbeddedResource Include="Embedded\Resources\Test.txt" />
 		<EmbeddedResource Include="Embedded\Resources\Subfolder\Nested.txt" />
+		<EmbeddedResource Include="Other\Unmatched.txt" />
 	</ItemGroup>
 
 	<ItemGroup>

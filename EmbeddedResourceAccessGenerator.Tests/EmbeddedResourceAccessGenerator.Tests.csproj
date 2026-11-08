@@ -7,24 +7,25 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-	  <None Remove="TestAssets\Subfolder With Spaces\Test With Spaces.txt" />
-	  <None Remove="TestAssets\Test With Spaces.txt" />
+		<None Remove="TestAssets\Subfolder With Spaces\Test With Spaces.txt"/>
+		<None Remove="TestAssets\Test With Spaces.txt"/>
 	</ItemGroup>
 
 	<ItemGroup>
-		<EmbeddedResource Include="Test.txt" />
-		<EmbeddedResource Include="TestAssets\Subfolder With Spaces\Test With Spaces.txt" />
-		<EmbeddedResource Include="TestAssets\Subfolder\Test.txt" />
-		<EmbeddedResource Include="TestAssets\Test With Spaces.txt" />
-		<EmbeddedResource Include="TestAssets\Test.txt" />
-		<EmbeddedResource Include="TestAssets\lowercase.txt" />
-		<EmbeddedResource Include="TestAssets\test_file.txt" />
-		<EmbeddedResource Include="TestAssets\test-file.txt" />
+		<EmbeddedResource Include="Test.txt"/>
+		<EmbeddedResource Include="TestAssets\Subfolder With Spaces\Test With Spaces.txt"/>
+		<EmbeddedResource Include="TestAssets\Subfolder\Test.txt"/>
+		<EmbeddedResource Include="TestAssets\Test With Spaces.txt"/>
+		<EmbeddedResource Include="TestAssets\Test.txt"/>
+		<EmbeddedResource Include="TestAssets\lowercase.txt"/>
+		<EmbeddedResource Include="TestAssets\test_file.txt"/>
+		<EmbeddedResource Include="TestAssets\test-file.txt"/>
+		<EmbeddedResource Include="TestAssets\my.config.file.txt"/>
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
-		<PackageReference Include="xunit.v3" Version="2.0.1" />
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0"/>
+		<PackageReference Include="xunit.v3" Version="2.0.1"/>
 		<PackageReference Include="xunit.runner.visualstudio" Version="3.0.2">
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -36,9 +37,9 @@
 		<AdditionalFileItemNames>$(AdditionalFileItemNames);EmbeddedResource</AdditionalFileItemNames>
 	</PropertyGroup>
 	<ItemGroup>
-		<CompilerVisibleItemMetadata Include="EmbeddedResource" MetadataName="ManifestResourceName" />
+		<CompilerVisibleItemMetadata Include="EmbeddedResource" MetadataName="ManifestResourceName"/>
 	</ItemGroup>
 	<ItemGroup>
-		<ProjectReference Include="..\EmbeddedResourceAccessGenerator\EmbeddedResourceAccessGenerator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+		<ProjectReference Include="..\EmbeddedResourceAccessGenerator\EmbeddedResourceAccessGenerator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
 	</ItemGroup>
 </Project>

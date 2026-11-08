@@ -92,4 +92,16 @@ public class EmbeddedResourceAccessGeneratorTests
 			"Expected one of the colliding resources to be accessible");
 	}
 
+	[Fact]
+	public void DottedFileName_CreatesNestedClasses()
+	{
+		// A file named "my.config.file.txt" produces nested classes:
+		// My -> Config -> File -> Txt
+		using var reader = EmbeddedResources.TestAssets.My.Config.File.Txt.GetReader();
+		Assert.Equal("DottedFileContent", reader.ReadToEnd());
+
+		using var stream = EmbeddedResources.TestAssets.My.Config.File.Txt.GetStream();
+		using var reader2 = new System.IO.StreamReader(stream);
+		Assert.Equal("DottedFileContent", reader2.ReadToEnd());
+	}
 }

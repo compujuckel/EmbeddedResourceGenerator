@@ -7,3 +7,4 @@
 Rule ID | Category | Severity | Notes
 --------|----------|----------|--------------------
 EMBRESGEN001  |  MessageExtensionGenerator   |  Error | An unknown exception occured during generation.
+EMBRESGEN002  |  MessageExtensionGenerator   |  Warning | Multiple resources map to the same identifier.

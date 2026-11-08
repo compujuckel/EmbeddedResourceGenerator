@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net9.0</TargetFramework>
+		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+		<CompilerGeneratedFilesOutputPath>$(BaseIntermediateOutputPath)\GeneratedFiles</CompilerGeneratedFilesOutputPath>
+		<!-- Configure the prefix to strip 'Embedded' from the generated class hierarchy -->
+		<EmbeddedResourcePrefix>Embedded</EmbeddedResourcePrefix>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<EmbeddedResource Include="Embedded\Resources\Test.txt" />
+		<EmbeddedResource Include="Embedded\Resources\Subfolder\Nested.txt" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
+		<PackageReference Include="xunit.v3" Version="2.0.1" />
+		<PackageReference Include="xunit.runner.visualstudio" Version="3.0.2">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+	</ItemGroup>
+
+	<PropertyGroup>
+		<AdditionalFileItemNames>$(AdditionalFileItemNames);EmbeddedResource</AdditionalFileItemNames>
+	</PropertyGroup>
+	<ItemGroup>
+		<CompilerVisibleItemMetadata Include="EmbeddedResource" MetadataName="ManifestResourceName" />
+		<CompilerVisibleProperty Include="EmbeddedResourcePrefix" />
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\EmbeddedResourceAccessGenerator\EmbeddedResourceAccessGenerator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+	</ItemGroup>
+</Project>

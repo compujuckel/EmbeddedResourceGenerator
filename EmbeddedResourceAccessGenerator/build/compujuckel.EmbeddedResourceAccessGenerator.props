@@ -1,0 +1,11 @@
+﻿<Project>
+	<PropertyGroup>
+		<!-- Include all EmbeddedResource files as additional file names.-->
+		<AdditionalFileItemNames>$(AdditionalFileItemNames);EmbeddedResource</AdditionalFileItemNames>
+	</PropertyGroup>
+	<ItemGroup>
+		<CompilerVisibleProperty Include="EmbeddedResourcePrefix" />
+		<!-- Expose ManifestResourceName metadata so the generator can read it. -->
+		<CompilerVisibleItemMetadata Include="EmbeddedResource" MetadataName="ManifestResourceName" />
+	</ItemGroup>
+</Project>

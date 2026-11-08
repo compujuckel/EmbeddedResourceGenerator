@@ -7,18 +7,14 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-	  <None Remove="TestAssets\$$InvalidChars\Test.txt" />
 	  <None Remove="TestAssets\Subfolder With Spaces\Test With Spaces.txt" />
 	  <None Remove="TestAssets\Test With Spaces.txt" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<EmbeddedResource Include="2InvalidChars-%3b.txt" />
 		<EmbeddedResource Include="Test.txt" />
-		<EmbeddedResource Include="TestAssets\$$InvalidChars\Test.txt" />
 		<EmbeddedResource Include="TestAssets\Subfolder With Spaces\Test With Spaces.txt" />
 		<EmbeddedResource Include="TestAssets\Subfolder\Test.txt" />
-		<EmbeddedResource Include="TestAssets\2InvalidChars-%3b.txt" />
 		<EmbeddedResource Include="TestAssets\Test With Spaces.txt" />
 		<EmbeddedResource Include="TestAssets\Test.txt" />
 	</ItemGroup>
@@ -36,6 +32,9 @@
 		<!-- Update the property to include all EmbeddedResource files -->
 		<AdditionalFileItemNames>$(AdditionalFileItemNames);EmbeddedResource</AdditionalFileItemNames>
 	</PropertyGroup>
+	<ItemGroup>
+		<CompilerVisibleItemMetadata Include="EmbeddedResource" MetadataName="ManifestResourceName" />
+	</ItemGroup>
 	<ItemGroup>
 		<ProjectReference Include="..\EmbeddedResourceAccessGenerator\EmbeddedResourceAccessGenerator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>

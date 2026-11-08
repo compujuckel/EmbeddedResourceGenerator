@@ -1,9 +1,11 @@
-﻿namespace EmbeddedResourceAccessGenerator;
+namespace EmbeddedResourceAccessGenerator;
 
+using System;
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Text;
 
 /// <summary>
@@ -35,11 +37,14 @@ public class EmbeddedResourceAccessGenerator : IIncrementalGenerator
 	{
 		//Debugger.Launch();
 
-		// We need a value provider for any addition file.
-		// As soon as there is direct access to embedded resources we can change this.
+		// The analyzer config options provider — we need it to read per-file metadata.
+		IncrementalValueProvider<AnalyzerConfigOptionsProvider> analyzerConfigProvider =
+			context.AnalyzerConfigOptionsProvider;
+
+		// We need a value provider for any additional file.
 		// All embedded resources are added as additional files through our build props integrated into the nuget.
-		IncrementalValueProvider<ImmutableArray<string>> additionaFilesProvider =
-			context.AdditionalTextsProvider.Select((t, _) => t.Path).Collect();
+		IncrementalValueProvider<ImmutableArray<AdditionalText>> additionalFilesProvider =
+			context.AdditionalTextsProvider.Select((t, _) => t).Collect();
 
 		// The root namespace value provider. Can this ever be null? So far I have not seen it.
 		IncrementalValueProvider<string?> rootNamespaceProvider = context.AnalyzerConfigOptionsProvider.Select((x, _) =>
@@ -47,43 +52,26 @@ public class EmbeddedResourceAccessGenerator : IIncrementalGenerator
 				? rootNamespace
 				: null);
 
-		// The project directory value provider. Can this ever be null? So far I have not seen it.
-		IncrementalValueProvider<string?> buildProjectDirProvider = context.AnalyzerConfigOptionsProvider.Select(
-			(x, _) =>
-				x.GlobalOptions.TryGetValue("build_property.projectdir", out string? rootNamespace)
-					? rootNamespace
-					: null);
-
 		// We combine the providers to generate the parameters for our source generation.
-		IncrementalValueProvider<(ImmutableArray<string> fileNames, string? rootNamespace, string? buildProjectDir)>
-			combined = additionaFilesProvider
-				.Combine(rootNamespaceProvider.Combine(buildProjectDirProvider)).Select((c, _) =>
-					(c.Left, c.Right.Left, c.Right.Right));
+		IncrementalValueProvider<(
+			ImmutableArray<AdditionalText> files,
+			AnalyzerConfigOptionsProvider AnalyzerConfig,
+			string? rootNamespace)> combined = additionalFilesProvider
+			.Combine(analyzerConfigProvider)
+			.Combine(rootNamespaceProvider)
+			.Select((c, _) => (c.Left.Left, c.Left.Right, c.Right));
 
 		context.RegisterSourceOutput(combined, this.GenerateSourceIncremental);
 	}
 
-	private static string GetRelativePath(string fullPath, string basePath)
-	{
-		if (!basePath.EndsWith(Path.DirectorySeparatorChar.ToString()))
-		{
-			basePath += Path.DirectorySeparatorChar;
-		}
-
-		Uri baseUri = new(basePath);
-		Uri fullUri = new(fullPath);
-
-		Uri relativeUri = baseUri.MakeRelativeUri(fullUri);
-
-		return relativeUri.ToString().Replace("/", Path.DirectorySeparatorChar.ToString());
-	}
-
 	private void GenerateSourceIncremental(SourceProductionContext context,
-		(ImmutableArray<string> fileNames, string? rootNamespace, string? buildProjectDir) arg2)
+		(ImmutableArray<AdditionalText> files,
+		 AnalyzerConfigOptionsProvider AnalyzerConfig,
+		 string? rootNamespace) arg)
 	{
 		try
 		{
-			this.GenerateSource(context, arg2.fileNames, arg2.buildProjectDir!, arg2.rootNamespace);
+			this.GenerateSource(context, arg.files, arg.AnalyzerConfig, arg.rootNamespace);
 		}
 		catch (Exception e)
 		{
@@ -93,297 +81,209 @@ public class EmbeddedResourceAccessGenerator : IIncrementalGenerator
 		}
 	}
 
-	private void GenerateSource(SourceProductionContext context, IList<string> paths, string mainDirectory,
+	/// <summary>
+	/// Reads the manifest resource name for an embedded resource from MSBuild metadata.
+	/// Assumes ManifestResourceName is always available.
+	/// </summary>
+	private static string GetManifestResourceName(AdditionalText additionalText, AnalyzerConfigOptionsProvider analyzerConfig)
+	{
+		AnalyzerConfigOptions options = analyzerConfig.GetOptions(additionalText);
+
+		if (options.TryGetValue("build_metadata.EmbeddedResource.ManifestResourceName", out string? manifestName)
+		    && !string.IsNullOrEmpty(manifestName))
+		{
+			return manifestName;
+		}
+
+		return string.Empty;
+	}
+
+	/// <summary>
+	/// Reads the optional prefix to strip from resource names. Configured via
+	/// build_property.EmbeddedResourcePrefix in .editorconfig.
+	/// </summary>
+	private static string? GetResourcePrefix(AnalyzerConfigOptionsProvider analyzerConfig)
+	{
+		if (analyzerConfig.GlobalOptions.TryGetValue("build_property.EmbeddedResourcePrefix", out string? prefix)
+		    && !string.IsNullOrEmpty(prefix))
+		{
+			return prefix;
+		}
+
+		return null;
+	}
+
+	/// <summary>
+	/// Strips the root namespace and optional configured prefix from a manifest resource name
+	/// to produce the relative name used for the class hierarchy.
+	/// E.g. if rootNamespace is "MyProject", prefix is "Embedded", and name is "MyProject.Embedded.Test.test.txt",
+	/// the result is "Test.test.txt".
+	/// </summary>
+	private static string GetRelativeResourceName(string manifestResourceName, string? rootNamespace, string? prefix)
+	{
+		// First, strip the root namespace prefix.
+		string relative = manifestResourceName;
+		if (!string.IsNullOrEmpty(rootNamespace))
+		{
+			string nsPattern = rootNamespace + ".";
+			if (relative.StartsWith(nsPattern, StringComparison.Ordinal))
+			{
+				relative = relative.Substring(nsPattern.Length);
+			}
+		}
+
+		// Then, strip the configured prefix if any.
+		if (string.IsNullOrEmpty(prefix))
+		{
+			return relative;
+		}
+
+		string pattern = prefix + ".";
+		if (relative.StartsWith(pattern, StringComparison.Ordinal))
+		{
+			return relative.Substring(pattern.Length);
+		}
+
+		return relative;
+	}
+
+	private void GenerateSource(SourceProductionContext context,
+		ImmutableArray<AdditionalText> files,
+		AnalyzerConfigOptionsProvider analyzerConfig,
 		string? rootNamespace)
 	{
-		if (!paths.Any())
+		if (files.IsDefaultOrEmpty)
 		{
 			return;
 		}
 
-		List<EmbeddedResourceItem> embeddedResources = [];
-		foreach (string path in paths)
-		{
-			string resourcePath =
-				EmbeddedResourceAccessGenerator.GetRelativePath(path, mainDirectory).Replace("%20"," ");
+		string? resourcePrefix = EmbeddedResourceAccessGenerator.GetResourcePrefix(analyzerConfig);
 
-			string resourceName = this.GetResourceName(resourcePath);
-			string identifierName = this.GetValidIdentifierName(resourcePath);
-			embeddedResources.Add(new EmbeddedResourceItem(resourcePath, identifierName, resourceName));
+		List<EmbeddedResourceItem> embeddedResources = [];
+		foreach (AdditionalText text in files)
+		{
+			string manifestResourceName = EmbeddedResourceAccessGenerator.GetManifestResourceName(text, analyzerConfig);
+			if (string.IsNullOrEmpty(manifestResourceName))
+			{
+				continue;
+			}
+
+			string relativeName = EmbeddedResourceAccessGenerator.GetRelativeResourceName(manifestResourceName, rootNamespace, resourcePrefix);
+			embeddedResources.Add(new EmbeddedResourceItem(relativeName, manifestResourceName));
+		}
+
+		if (embeddedResources.Count == 0)
+		{
+			return;
+		}
+
+		// Build a tree structure from the stripped manifest resource names.
+		// The name (e.g. "TestAssets.Subfolder.Test.txt") maps to nested classes.
+		var root = new ResourceNode(string.Empty, null);
+
+		foreach (var item in embeddedResources)
+		{
+			// Split the stripped name by '.' to create nested classes for each part.
+			// e.g., "TestAssets.Subfolder.Test.txt" -> "TestAssets" -> "Subfolder" -> "Test" -> "txt"
+			string[] nameParts = item.StrippedName.Split('.');
+			ResourceNode current = root;
+			for (int i = 0; i < nameParts.Length; i++)
+			{
+				string identifier = EmbeddedResourceAccessGenerator.GetValidIdentifierName(nameParts[i]);
+				// Only the last part gets the resource item.
+				EmbeddedResourceItem? resourceItem = i == nameParts.Length - 1 ? item : null;
+				current = current.FindOrCreateChild(identifier, resourceItem);
+			}
 		}
 
 		StringBuilder sourceBuilder = new();
-		sourceBuilder.AppendLine($$"""
-				#nullable enable
-				namespace {{rootNamespace}};
-				using System;
-				using System.Collections;
-				using System.IO;
-				using System.Reflection;
+		sourceBuilder.AppendLine("#nullable enable");
+		sourceBuilder.AppendLine("#pragma warning disable CS8981 // The type name differs only by case from the local type name");
+		sourceBuilder.AppendLine($"namespace {rootNamespace};");
+		sourceBuilder.AppendLine("using System;");
+		sourceBuilder.AppendLine("using System.IO;");
+		sourceBuilder.AppendLine("using System.Reflection;");
+		sourceBuilder.AppendLine();
+		sourceBuilder.AppendLine("/// <summary>");
+		sourceBuilder.AppendLine("/// Auto-generated class to access all embedded resources in an assembly.");
+		sourceBuilder.AppendLine("/// </summary>");
+		sourceBuilder.AppendLine("internal static partial class EmbeddedResources");
+		sourceBuilder.AppendLine("{");
 
-				/// <summary>
-				/// Auto-generated class to access all embedded resources in an assembly.
-				/// </summary>
-				public static partial class EmbeddedResources
-				{
-				""");
-
-		foreach ((string _, string identifierName, string resourceName) in embeddedResources)
-		{
-			sourceBuilder.AppendLine($$"""
-					/// <summary>
-					/// Gets the embedded resource '{{resourceName}}' as a stream.
-					/// </summary>
-					/// <returns>The stream to access the embedded resource.</returns>
-					public static Stream {{identifierName}}_Stream
-					{
-						get {
-							Assembly assembly = typeof(EmbeddedResources).Assembly;
-							string resource = "{{rootNamespace}}.{{resourceName}}";
-							return assembly.GetManifestResourceStream(resource)!;
-						}
-					}
-
-					/// <summary>
-					/// Gets the embedded resource '{{resourceName}}' as a StreamReader.
-					/// </summary>
-					/// <returns>The StreamReader to access the embedded resource.</returns>
-					public static StreamReader {{identifierName}}_Reader
-					{
-						get 
-						{
-							Assembly assembly = typeof(EmbeddedResources).Assembly;
-							string resource = "{{rootNamespace}}.{{resourceName}}";
-							return new StreamReader(assembly.GetManifestResourceStream(resource)!);
-						}
-					}
-
-				""");
-		}
-
-		sourceBuilder.AppendLine("""
-					/// <summary>
-					/// Gets the embedded resource's stream.
-					/// </summary>
-					/// <param name="resource">The embedded resource to retrieve the stream for.</param>
-					/// <returns>The stream to access the embedded resource.</returns>
-					public static Stream GetStream(this EmbeddedResource resource)
-					{
-						Assembly assembly = typeof(EmbeddedResources).Assembly;
-						return assembly.GetManifestResourceStream(GetResourceName(resource))!;
-					}
-				
-					/// <summary>
-					/// Gets the embedded resource's StreamReader.
-					/// </summary>
-					/// <param name="resource">The embedded resource to retrieve the StreamReader for.</param>
-					/// <returns>The StreamReader to access the embedded resource.</returns>
-					public static StreamReader GetReader(this EmbeddedResource resource)
-					{
-						Assembly assembly = typeof(EmbeddedResources).Assembly;
-						return new StreamReader(assembly.GetManifestResourceStream(GetResourceName(resource))!);
-					}
-
-				""");
-
-		sourceBuilder.AppendLine("""
-					/// <summary>
-					/// Gets the embedded resource's name in the format required by <c>GetManifestResourceStream</c>.
-					/// </summary>
-					/// <param name="resource">The embedded resource to retrieve the name for.</param>
-					/// <returns>The name to access the embedded resource.</returns>
-					public static string GetResourceName(this EmbeddedResource resource)
-					{
-						return resource switch 
-						{
-				""");
-
-		foreach ((string _, string identifierName, string resourceName) in embeddedResources)
-		{
-			sourceBuilder.AppendLine($$"""
-							EmbeddedResource.{{identifierName}} => "{{rootNamespace}}.{{resourceName}}",
-				""");
-		}
-
-		sourceBuilder.AppendLine("""			_ => throw new InvalidOperationException(),""");
-
-		sourceBuilder.AppendLine("\t\t};");
-
-		sourceBuilder.AppendLine("\t}");
-
-		foreach (IGrouping<string, EmbeddedResourceItem> pathGrouped in embeddedResources.GroupBy(g =>
-			         Path.GetDirectoryName(g.RelativePath)))
-		{
-			string pathAsClassName = this.PathAsClassname(pathGrouped.Key);
-			if (!string.IsNullOrEmpty(pathGrouped.Key))
-			{
-				sourceBuilder.AppendLine($$"""
-				
-					/// <summary>
-					/// Gets the embedded resource's stream.
-					/// </summary>
-					/// <param name="resource">The embedded resource to retrieve the stream for.</param>
-					/// <returns>The stream to access the embedded resource.</returns>
-					public static Stream GetStream(this EmbeddedResource{{pathAsClassName}} resource)
-					{
-						Assembly assembly = typeof(EmbeddedResources).Assembly;
-						return assembly.GetManifestResourceStream(GetResourceName(resource))!;
-					}
-				
-					/// <summary>
-					/// Gets the embedded resource's StreamReader.
-					/// </summary>
-					/// <param name="resource">The embedded resource to retrieve the StreamReader for.</param>
-					/// <returns>The StreamReader to access the embedded resource.</returns>
-					public static StreamReader GetReader(this EmbeddedResource{{pathAsClassName}} resource)
-					{
-						Assembly assembly = typeof(EmbeddedResources).Assembly;
-						return new StreamReader(assembly.GetManifestResourceStream(GetResourceName(resource))!);
-					}
-				""");
-
-				sourceBuilder.AppendLine($$"""
-				
-					/// <summary>
-					/// Gets the embedded resource's name in the format required by <c>GetManifestResourceStream</c>.
-					/// </summary>
-					/// <param name="resource">The embedded resource to retrieve the name for.</param>
-					/// <returns>The name to access the embedded resource.</returns>
-					public static string GetResourceName(this EmbeddedResource{{pathAsClassName}} resource)
-					{
-						return resource switch 
-						{
-				""");
-
-				foreach ((string relativePath, string identifierName, string resourceName) in pathGrouped)
-				{
-					string nonPathedIdentifierName = this.GetValidIdentifierName(Path.GetFileName(relativePath));
-
-					sourceBuilder.AppendLine($$"""
-							EmbeddedResource{{pathAsClassName}}.{{nonPathedIdentifierName}} => "{{rootNamespace}}.{{resourceName}}",
-				""");
-				}
-
-				sourceBuilder.AppendLine("""			_ => throw new InvalidOperationException(),""");
-
-				sourceBuilder.AppendLine("\t\t};");
-
-				sourceBuilder.AppendLine("\t}");
-			}
-		}
+		// Generate the class hierarchy.
+		this.EmitResourceTree(sourceBuilder, root, 1);
 
 		sourceBuilder.AppendLine("}");
-
-		sourceBuilder.AppendLine("""
-				
-				/// <summary>
-				/// Auto-generated enumeration for all embedded resources in the assembly.
-				/// </summary>
-				public enum EmbeddedResource
-				{
-				""");
-
-		foreach ((string _, string identifierName, string resourceName) in embeddedResources)
-		{
-			sourceBuilder.AppendLine($$"""
-					/// <summary>
-					/// Represents the embedded resource '{{resourceName}}'.
-					/// </summary>
-					{{identifierName}},
-				""");
-		}
-
-		sourceBuilder.AppendLine("}");
-
-		foreach (IGrouping<string, EmbeddedResourceItem> pathGrouped in embeddedResources.GroupBy(g =>
-			         Path.GetDirectoryName(g.RelativePath)))
-		{
-			string pathAsClassName = this.PathAsClassname(pathGrouped.Key);
-			if (!string.IsNullOrEmpty(pathGrouped.Key))
-			{
-				sourceBuilder.AppendLine($$"""
-						
-						/// <summary>
-						/// Auto-generated enumeration for all embedded resources in '{{pathGrouped.Key}}'.
-						/// </summary>
-						public enum EmbeddedResource{{pathAsClassName}}
-						{
-						""");
-
-				foreach (EmbeddedResourceItem item in pathGrouped)
-				{
-					string nonPathedIdentifierName = this.GetValidIdentifierName(Path.GetFileName(item.RelativePath));
-
-					sourceBuilder.AppendLine($$"""
-							/// <summary>
-							/// Represents the embedded resource '{{Path.GetFileName(item.RelativePath)}}' in {{pathGrouped.Key}}.
-							/// </summary>
-							{{nonPathedIdentifierName}},
-						""");
-				}
-
-				sourceBuilder.AppendLine("}");
-			}
-		}
-
-		sourceBuilder.Append("#nullable restore");
+		sourceBuilder.AppendLine("#nullable restore");
 
 		SourceText source = SourceText.From(sourceBuilder.ToString(), Encoding.UTF8);
 		context.AddSource("EmbeddedResources.generated.cs", source);
 	}
 
-	private string GetResourceName(string resourcePath)
+	/// <summary>
+	/// Recursively emits the resource tree as nested static classes.
+	/// Each file becomes a nested static class with GetStream() and GetReader() methods.
+	/// Each directory becomes a nested static class containing its children.
+	/// </summary>
+	private void EmitResourceTree(StringBuilder sb, ResourceNode node, int indent)
 	{
-		// return CreateManifestResourceName.MakeValidEverettIdentifier(resourcePath);
-		// If we reference Microsoft.Build.Tasks.Core we get this error on our referencing projects:
-		// Error	EMBRESGEN001	Exception 'Could not load file or assembly 'Microsoft.Build.Tasks.Core, Version=15.1.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a'
-		// or one of its dependencies. The system cannot find the file specified.'
-		// at EmbeddedResourceAccessGenerator.EmbeddedResourceAccessGenerator.GetResourceName(String resourcePath)
+		int indentSize = indent * 2;
+		string indentStr = new(' ', indentSize);
 
-		// So instead we implement the code ourselves.
-		StringBuilder manifestName = new();
-		// See https://github.com/dotnet/msbuild/blob/7cfb36cb90d1c9cc34bc4e0910d0c9ef42ee47b6/src/Tasks/CreateCSharpManifestResourceName.cs#L152
-		string? directoryName = Path.GetDirectoryName(resourcePath);
-		manifestName.Append(EverettIdentifierHelper.MakeValidEverettIdentifier(directoryName));
-		if (!string.IsNullOrEmpty(directoryName))
+		foreach (var child in node.Children)
 		{
-			manifestName.Append('.');
-		}
-
-		manifestName.Append(Path.GetFileName(resourcePath));
-
-		return manifestName.ToString();
-	}
-
-	private string PathAsClassname(string path)
-	{
-		return this.GetValidIdentifierName(path.Replace("\\", string.Empty).Replace("/", string.Empty));
-	}
-
-	private string GetValidEverettIdentifierName(string resourceName)
-	{
-		StringBuilder sb = new(resourceName);
-
-		bool first = true;
-		for (int index = 0; index < resourceName.Length; index++)
-		{
-			char c = resourceName[index];
-			bool replace = first
-				? !EverettIdentifierHelper.IsValidEverettIdFirstChar(c)
-				: !EverettIdentifierHelper.IsValidEverettIdChar(c);
-
-			if (replace)
+			if (child.ResourceItem != null)
 			{
-				sb[index] = '_';
+				// This is a leaf node — a file resource. Emit a nested class for it.
+				string manifestName = child.ResourceItem.ManifestResourceName;
+
+				sb.AppendLine($"{indentStr}/// <summary>");
+				sb.AppendLine($"{indentStr}/// Represents the embedded resource '{manifestName}'.");
+				sb.AppendLine($"{indentStr}/// </summary>");
+				sb.AppendLine($"{indentStr}internal static class {child.Identifier}");
+				sb.AppendLine($"{indentStr}{{");
+
+				string innerIndent = new(' ', (indent + 1) * 2);
+
+				sb.AppendLine($"{innerIndent}/// <summary>");
+				sb.AppendLine($"{innerIndent}/// Gets the embedded resource '{manifestName}' as a stream.");
+				sb.AppendLine($"{innerIndent}/// </summary>");
+				sb.AppendLine($"{innerIndent}internal static Stream GetStream()");
+				sb.AppendLine($"{innerIndent}{{");
+				sb.AppendLine($"{innerIndent}\tAssembly assembly = typeof(EmbeddedResources).Assembly;");
+				sb.AppendLine($"{innerIndent}\treturn assembly.GetManifestResourceStream(\"{manifestName}\")!;");
+				sb.AppendLine($"{innerIndent}}}");
+				sb.AppendLine();
+				sb.AppendLine($"{innerIndent}/// <summary>");
+				sb.AppendLine($"{innerIndent}/// Gets the embedded resource '{manifestName}' as a StreamReader.");
+				sb.AppendLine($"{innerIndent}/// </summary>");
+				sb.AppendLine($"{innerIndent}internal static StreamReader GetReader()");
+				sb.AppendLine($"{innerIndent}{{");
+				sb.AppendLine($"{innerIndent}\tAssembly assembly = typeof(EmbeddedResources).Assembly;");
+				sb.AppendLine($"{innerIndent}\treturn new StreamReader(assembly.GetManifestResourceStream(\"{manifestName}\")!);");
+				sb.AppendLine($"{innerIndent}}}");
+
+				sb.AppendLine($"{indentStr}}}");
+				sb.AppendLine();
 			}
+			else
+			{
+				// This is a directory node — emit a nested static class.
+				sb.AppendLine($"{indentStr}/// <summary>");
+				sb.AppendLine($"{indentStr}/// Auto-generated class for embedded resources in the '{child.Identifier}' folder.");
+				sb.AppendLine($"{indentStr}/// </summary>");
+				sb.AppendLine($"{indentStr}internal static class {child.Identifier}");
+				sb.AppendLine($"{indentStr}{{");
 
-			first = false;
+				this.EmitResourceTree(sb, child, indent + 1);
+
+				sb.AppendLine($"{indentStr}}}");
+				sb.AppendLine();
+			}
 		}
-
-		return sb.ToString();
 	}
 
-	private string GetValidIdentifierName(string resourceName)
+	private static string GetValidIdentifierName(string resourceName)
 	{
 		StringBuilder sb = new(resourceName);
 		sb.Replace('.', '_');
@@ -426,14 +326,35 @@ public class EmbeddedResourceAccessGenerator : IIncrementalGenerator
 
 		return sb.ToString();
 	}
+}
 
+/// <summary>
+/// Represents a node in the resource tree (either a folder or a file).
+/// </summary>
+internal class ResourceNode
+{
+	public string Identifier { get; }
+	public EmbeddedResourceItem? ResourceItem { get; }
+	public List<ResourceNode> Children { get; } = [];
 
-	private void Log(GeneratorExecutionContext context, string log)
+	public ResourceNode(string identifier, EmbeddedResourceItem? resourceItem)
 	{
-#if DEBUG
-#pragma warning disable RS1035
-		context.ReportDiagnostic(Diagnostic.Create(EmbeddedResourceAccessGenerator.logInfo, Location.None, log));
-#pragma warning restore RS1035
-#endif
+		this.Identifier = identifier;
+		this.ResourceItem = resourceItem;
+	}
+
+	public ResourceNode FindOrCreateChild(string identifier, EmbeddedResourceItem? resourceItem)
+	{
+		foreach (var child in this.Children)
+		{
+			if (child.Identifier == identifier)
+			{
+				return child;
+			}
+		}
+
+		var newNode = new ResourceNode(identifier, resourceItem);
+		this.Children.Add(newNode);
+		return newNode;
 	}
 }

@@ -1,7 +1,8 @@
 {
   "profiles": {
     "EmbeddedResourceAccessGenerator": {
-      "commandName": "Project"
+			"commandName": "DebugRoslynComponent",
+			"targetProject": "../../EmbeddedResourceAccessGenerator.Tests/EmbeddedResourceAccessGenerator.Tests.csproj"
     }
   }
 }
